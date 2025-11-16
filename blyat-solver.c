@@ -9,9 +9,9 @@ typedef struct {
                     //format of 2d array:
                     // - each row is a clause
                     // - each entry is an atom
-                    //     - 0 means no atom
-                    //     - i means the atom p_i
-                    //     - -i mean the atom ¬p_i
+                    //     - 0 means no atom present
+                    //     - 1 means the atom p_i is present
+                    //     - -1 mean the atom ¬p_i is present
 } sat_t;
 
 int init_sat_arr(sat_t *sat) {
@@ -54,17 +54,20 @@ bool char_is_digit(char c) {
     return false;
 }
 
-int parse_file_and_init_sat(char *input_file, sat_t *sat) {
-    //read into buffer
-    FILE *fp = fopen(input_file, "r");
-    if (!fp) {
-        return -1;
+void remove_clause(sat_t *sat, int clear_row) {
+    for (int i = 0; i < sat->columns; i++) {
+        sat->content[clear_row][i] = 0;
     }
+}
+
+int parse_file_and_init_sat(char *input_file, sat_t *sat) {
+    FILE *fp = fopen(input_file, "r");
+    if (!fp) return -1;
 
     size_t capacity = 4096;
     size_t size = 0;
     char *buffer = malloc(capacity);
-    if (!buffer) {
+    if (!buffer) { 
         fclose(fp);
         return -1;
     }
@@ -83,8 +86,7 @@ int parse_file_and_init_sat(char *input_file, sat_t *sat) {
             buffer = new_buffer;
         }
     }
-
-    if (ferror(fp)) {  // Check for read errors
+    if (ferror(fp)) {
         free(buffer);
         fclose(fp);
         return -1;
@@ -93,20 +95,15 @@ int parse_file_and_init_sat(char *input_file, sat_t *sat) {
     buffer[size] = '\0';
     fclose(fp);
 
-    /*    for (int i = 0; i < size; i++) {
-        printf("%c", buffer[i]);
-    }
-    printf("\n");
-    */
-
-    //parse buffer into 2d array
     sat->rows = -1;
     sat->columns = -1;
     bool comment = false;
     bool p = false;
     bool sat_initialised = false;
+    int first_clause_pos = -1;
 
-    for (int i = 0; i < size; i++) {
+    // determine rows and columns in the matrix
+    for (int i = 0; i < (int)size; i++) {
         if (buffer[i] == 'c') {
             comment = true;
         }
@@ -114,51 +111,137 @@ int parse_file_and_init_sat(char *input_file, sat_t *sat) {
             comment = false;
             p = false;
         }
-        if (comment) {
+        if (comment) { 
             continue;
         }
-        //initialise sat struct
         if (buffer[i] == 'p' && !sat_initialised) {
             p = true;
         }
         if (p && !sat_initialised) {
-            char num_buffer[50];
+            char num_buffer[64];
             int nb_pos = 0;
-            while (!char_is_digit(buffer[i])) {
+            while (i < (int)size && !char_is_digit(buffer[i])) {
                 i++;
             }
-            while (char_is_digit(buffer[i])) {
-                num_buffer[nb_pos] = buffer[i];
-                i++;
-                nb_pos++;
+            while (i < (int)size && char_is_digit(buffer[i]) && nb_pos < (int)sizeof(num_buffer)-1) {
+                num_buffer[nb_pos++] = buffer[i++];
             }
-            num_buffer[nb_pos+1] = '\0';
-            sat->columns = atoi(num_buffer);
+            num_buffer[nb_pos] = '\0';
+            if (nb_pos == 0) return -1;
+            sat->columns = atoi(num_buffer); 
+
             nb_pos = 0;
-            while (!char_is_digit(buffer[i])) {
+            while (i < (int)size && !char_is_digit(buffer[i])) {
                 i++;
             }
-            while (char_is_digit(buffer[i])) {
-                num_buffer[nb_pos] = buffer[i];
-                i++;
-                nb_pos++;
+            while (i < (int)size && char_is_digit(buffer[i]) && nb_pos < (int)sizeof(num_buffer)-1) {
+                num_buffer[nb_pos++] = buffer[i++];
             }
-            num_buffer[nb_pos+1] = '\0';
-            sat->rows = atoi(num_buffer);
+            num_buffer[nb_pos] = '\0';
+            if (nb_pos == 0) return -1;
+            sat->rows = atoi(num_buffer); 
 
-            init_sat_arr(sat);
+            if (sat->rows <= 0 || sat->columns <= 0) {
+                return -1;
+            }
+
+            if (init_sat_arr(sat) != 0) {
+                return -1;
+            }
             sat_initialised = true;
-            //at this point we have allocated a 2d array initialised with 0s
 
-            while (buffer[i] != '\n') {
+            while (i < (int)size && buffer[i] != '\n') {
+                i++;
+            }
+            if (i < (int)size) {
+                first_clause_pos = i + 1;
+            }
+            else {
+                first_clause_pos = i;
+            }
+        }
+        if (sat_initialised) {
+            break;
+        }
+    }
+
+    if (!sat_initialised || first_clause_pos < 0) {
+        free(buffer);
+        return -1;
+    }
+
+    // fill the clauses: each clause line has integers terminating with 0
+    int row = 0;
+    bool tautology = false;
+    for (int i = first_clause_pos; i < (int)size && row < sat->rows; i++) {
+        while (i < (int)size && buffer[i] == ' ') {
+            i++;
+        }
+        while (i < (int)size) {
+            while (i < (int)size && !char_is_digit(buffer[i]) && buffer[i] != '-' && buffer[i] != '0') {
+                if (buffer[i] == '\n') {
+                    break;
+                }
+                i++;
+            }
+            if (i >= (int)size) {
+                break;
+            }
+            if (buffer[i] == '\n') {
+                break;
+            }
+            if (buffer[i] == '0') {
+                i++;
+                break;
+            }
+
+            char num_buffer[64];
+            int nb_pos = 0;
+            if (buffer[i] == '-') {
+                num_buffer[nb_pos++] = buffer[i++];
+            }
+            while (i < (int)size && char_is_digit(buffer[i]) && nb_pos < (int)sizeof(num_buffer)-1) {
+                num_buffer[nb_pos++] = buffer[i++];
+            }
+            num_buffer[nb_pos] = '\0';
+            if (nb_pos == 0) {
+                i++;
+                continue;
+            }
+            int value = atoi(num_buffer);
+
+            // add atom to clause
+            // remove tautology if detected
+            if (value < 0) {
+                if (sat->content[row][abs(value) - 1] == 1) {
+                    remove_clause(sat, row);
+                    tautology = true;
+                } else if (!tautology) {
+                    sat->content[row][abs(value) - 1] = -1;
+                }
+            } 
+            else {
+                if (sat->content[row][abs(value) - 1] == -1) {
+                    remove_clause(sat, row);
+                    tautology = true;
+                } else if (!tautology) {
+                    sat->content[row][abs(value) - 1] = 1;
+                }
+            }
+
+            while (i < (int)size && (buffer[i] == ' ' || buffer[i] == '\t')) {
                 i++;
             }
         }
-
-        //fill contents of the array with the sat problem
-
-
+        while (i < (int)size && buffer[i] != '\n') {
+            i++;
+        }
+        row++;
+        tautology = false;
     }
+
+    free(buffer);
+    return 0;
 }
 
 int main() {
