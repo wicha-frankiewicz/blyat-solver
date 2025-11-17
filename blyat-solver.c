@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <string.h>
 
 typedef struct {
     int rows;       //n.o atoms  
@@ -244,9 +245,87 @@ int parse_file_and_init_sat(char *input_file, sat_t *sat) {
     return 0;
 }
 
+bool is_pure_literal(int atom, sat_t *sat) {
+    int polarity = 0;
+    for (int i = 1; i < sat->rows; i++) {
+        if (sat->content[i][atom] == 0) {
+            continue;
+        }
+        else {
+            if (polarity == 0) {
+                polarity = sat->content[i][atom];
+            }
+            else if (polarity == -sat->content[i][atom]) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void eliminate_clauses_with_atom(int atom, sat_t *sat) {
+    for (int i = 1; i < sat->rows; i++) {
+        if (sat->content[i][atom] != 0) {
+            for (int j = 0; j < sat->columns; j++) {
+                sat->content[i][j] = 0;
+            }
+        }
+    }
+}
+
+void pure_literal_elimination(sat_t *sat) {
+    for (int i = 0; i < sat->columns; i++) {
+        if (is_pure_literal(i, sat)) {
+            eliminate_clauses_with_atom(i, sat);
+        }
+    }
+}
+
+
+sat_t *sat_copy(sat_t *sat){
+    if (!sat) {
+        return NULL;
+    }
+
+    sat_t *sat_copy = malloc(sizeof(sat));
+    if (!sat_copy) {
+        return NULL;
+    }
+    
+    sat_copy->rows = sat->rows;
+    sat_copy->columns = sat->columns;
+
+    sat_copy->content = malloc(sat_copy->rows * sizeof(int *));
+    if (!sat_copy->content) {
+        free(sat_copy);
+        return NULL;
+    }
+
+    for (int i = 0; i < sat_copy->rows; i++) {
+        sat_copy->content[i] = malloc(sat_copy->columns * sizeof(int));
+        if (!sat_copy->content[i]) {
+            for (int j = 0; j < i; j++) {
+                free(sat_copy->content[j]);
+            }
+            free(sat_copy->content);
+            free(sat_copy);
+            return NULL;
+        }
+        memcpy(sat_copy->content[i], sat->content[i], sat_copy->columns * sizeof(int));
+    }
+    return sat_copy;
+}
+
 int main() {
     sat_t sat;
-    parse_file_and_init_sat("sat-comp/sat_tests/simple/prop_rnd_6136_v_6_c_25_vic_1_4.cnf", &sat);
-    print_sat(&sat);
+    sat_t *sat_p = &sat;
+    parse_file_and_init_sat("sat-comp/sat_tests/simple/prop_rnd_6136_v_6_c_25_vic_1_4.cnf", sat_p);
+    print_sat(sat_p);
+    sat_t *sat2_p = sat_copy(sat_p);
+
+    pure_literal_elimination(sat2_p);
+    printf("\n");
+
+    print_sat(sat2_p);
     return 0;
 }
